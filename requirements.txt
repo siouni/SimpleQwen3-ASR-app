@@ -1,0 +1,6 @@
+# このファイルは現在のアプリ実行に必要な Python 依存関係を PyTorch を除いて固定バージョンで定義します。
+PySide6==6.9.1
+numpy==2.4.3
+soundfile==0.13.1
+scipy==1.17.1
+qwen-asr==0.0.6
