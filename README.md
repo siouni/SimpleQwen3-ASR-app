@@ -43,10 +43,13 @@ SimpleQwen3-ASR は、PySide6 ベースのシンプルな GUI で Qwen3-ASR と 
 ### 1. `setup.bat` を使う方法
 
 セットアップ済みのバッチで環境構築する方法です。
+この方法では、`uv`、Python 仮想環境、PyTorch、Qwen 系ランタイム、モデルダウンロードまでまとめて構成する想定です。
 
 実行前に、できるだけ短いパスで、英字のみを使い、スペースや記号を含まないフォルダを作成し、その中に `setup.bat` を置いて実行することを推奨します。
 
 `setup.bat` は、実行した bat ファイルと同じ階層を基準に `.venv`、`runtime`、`models` などの各種ファイルを保存します。
+
+パターンA: `setup.bat` だけをダウンロードして実行
 
 `setup.bat` だけを取得したい場合は、GitHub から直接ダウンロードできます。
 
@@ -57,11 +60,24 @@ SimpleQwen3-ASR は、PySide6 ベースのシンプルな GUI で Qwen3-ASR と 
 .\setup.bat
 ```
 
-この方法では、`uv`、Python 仮想環境、PyTorch、Qwen 系ランタイム、モデルダウンロードまでまとめて構成する想定です。
+パターンB: リポジトリを `git clone` してから実行
+
+```powershell
+git clone https://github.com/siouni/SimpleQwen3-ASR-app.git
+cd .\SimpleQwen3-ASR-app
+.\setup.bat
+```
 
 ### 2. `uv` と `requirements.txt` を使う方法
 
 `uv` が既にユーザー環境にインストール済みで、PyTorch を別途インストールする前提で、アプリ実行に必要な Python パッケージのみを入れる方法です。
+
+まずリポジトリを取得します。
+
+```powershell
+git clone https://github.com/siouni/SimpleQwen3-ASR-app.git
+cd .\SimpleQwen3-ASR-app
+```
 
 まず仮想環境を用意します。
 
