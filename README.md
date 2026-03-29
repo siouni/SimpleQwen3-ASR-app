@@ -146,3 +146,7 @@ python .\app.py
 - `launch_app.bat`: アプリ起動用バッチ
 - `setup.bat`: Windows 向けセットアップバッチ
 - `requirements.txt`: PyTorch を除く固定バージョン依存関係
+
+## 作者
+
+- X: https://x.com/siouni_unia
