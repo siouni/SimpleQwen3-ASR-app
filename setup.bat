@@ -28,6 +28,19 @@ set "UV_ZIP_PATH=%DOWNLOAD_DIR%\%UV_ARCHIVE%"
 set "UV_EXTRACT_DIR=%DOWNLOAD_DIR%\uv_extract"
 set "UV_EXE=%UV_DIR%\uv.exe"
 set "VENV_PYTHON=%UV_PROJECT_ENVIRONMENT%\Scripts\python.exe"
+set "GIT_VERSION=2.52.0"
+set "GIT_RELEASE_TAG=v2.52.0.windows.1"
+set "GIT_ARCHIVE=MinGit-2.52.0-64-bit.zip"
+set "GIT_URL=https://github.com/git-for-windows/git/releases/download/%GIT_RELEASE_TAG%/%GIT_ARCHIVE%"
+set "GIT_DIR=%RUNTIME_DIR%\git"
+set "GIT_ZIP_PATH=%DOWNLOAD_DIR%\%GIT_ARCHIVE%"
+set "GIT_EXTRACT_DIR=%DOWNLOAD_DIR%\git_extract"
+set "GIT_EXE=%GIT_DIR%\cmd\git.exe"
+
+set "REPO_URL=https://github.com/siouni/SimpleQwen3-ASR-app.git"
+set "REPO_BRANCH=main"
+set "REPO_TMP_PARENT=%RUNTIME_DIR%\repo_tmp"
+set "REPO_TMP_DIR=%REPO_TMP_PARENT%\SimpleQwen3-ASR-app"
 
 set "PYTHON_REQUEST=3.12"
 set "GPU_CHECK_TMP=%TEMP%\qwen_asr_gpu_check.txt"
@@ -88,6 +101,78 @@ echo [INFO] GPU と NVIDIA ドライバは概ね利用可能です。
 echo [INFO] CUDA の最終確認は PyTorch 導入フェーズで行ってください。
 
 call :CLEANUP_GPU_TMP
+
+
+echo.
+echo [補助処理 1/4] Git コマンドの確認
+
+where git.exe >nul 2>nul
+if errorlevel 1 (
+    if exist "%GIT_EXE%" (
+        echo [INFO] runtime 配下の Git を使用します。
+    ) else (
+        echo [INFO] Git が見つからないため MinGit を runtime に配置します。
+
+        if not exist "%GIT_DIR%" mkdir "%GIT_DIR%"
+        if exist "%GIT_EXTRACT_DIR%" rmdir /s /q "%GIT_EXTRACT_DIR%"
+        mkdir "%GIT_EXTRACT_DIR%"
+
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
+            "Invoke-WebRequest -Uri '%GIT_URL%' -OutFile '%GIT_ZIP_PATH%'"
+        if errorlevel 1 call :FAIL "MinGit のダウンロードに失敗しました。"
+
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
+            "Expand-Archive -LiteralPath '%GIT_ZIP_PATH%' -DestinationPath '%GIT_EXTRACT_DIR%' -Force"
+        if errorlevel 1 call :FAIL "MinGit の展開に失敗しました。"
+
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
+            "Copy-Item -Path '%GIT_EXTRACT_DIR%\*' -Destination '%GIT_DIR%' -Recurse -Force"
+        if errorlevel 1 call :FAIL "MinGit の配置に失敗しました。"
+
+        if not exist "%GIT_EXE%" call :FAIL "git.exe の配置に失敗しました。"
+    )
+
+    set "PATH=%GIT_DIR%\cmd;%GIT_DIR%\mingw64\bin;%PATH%"
+    echo [INFO] Git Path: %GIT_EXE%
+) else (
+    for /f "delims=" %%I in ('where git.exe') do set "GIT_EXE=%%I"
+    echo [INFO] system Git Path: %GIT_EXE%
+)
+
+echo.
+echo [補助処理 2/4] Git コマンドの動作確認
+
+"%GIT_EXE%" --version
+if errorlevel 1 call :FAIL "git コマンドの実行確認に失敗しました。"
+
+echo.
+echo [補助処理 3/4] アプリ本体ファイルの確認
+
+if exist "%ROOT_DIR%app.py" if exist "%ROOT_DIR%launch_app.bat" (
+    echo [INFO] app.py / launch_app.bat は揃っています。
+    goto :AFTER_ENSURE_REPO
+)
+
+echo [INFO] アプリ本体ファイルが不足しているため、GitHub から取得します。
+
+if exist "%REPO_TMP_PARENT%" rmdir /s /q "%REPO_TMP_PARENT%"
+mkdir "%REPO_TMP_PARENT%"
+
+"%GIT_EXE%" clone --depth 1 --branch %REPO_BRANCH% "%REPO_URL%" "%REPO_TMP_DIR%"
+if errorlevel 1 call :FAIL "アプリ本体の clone に失敗しました。"
+
+if not exist "%ROOT_DIR%app.py" if exist "%REPO_TMP_DIR%\app.py" copy /y "%REPO_TMP_DIR%\app.py" "%ROOT_DIR%app.py" >nul
+if not exist "%ROOT_DIR%launch_app.bat" if exist "%REPO_TMP_DIR%\launch_app.bat" copy /y "%REPO_TMP_DIR%\launch_app.bat" "%ROOT_DIR%launch_app.bat" >nul
+
+if not exist "%ROOT_DIR%app.py" call :FAIL "app.py の再配置に失敗しました。"
+if not exist "%ROOT_DIR%launch_app.bat" call :FAIL "launch_app.bat の再配置に失敗しました。"
+
+rmdir /s /q "%REPO_TMP_PARENT%"
+echo [INFO] 不足していたアプリ本体ファイルを再配置しました。
+:AFTER_ENSURE_REPO
+echo.
+echo [補助処理 4/4] アプリ本体ファイルの確認完了
+
 
 rem ============================================
 rem uv / Python / .venv 構築
