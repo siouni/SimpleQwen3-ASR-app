@@ -45,20 +45,18 @@ SimpleQwen3-ASR は、PySide6 ベースのシンプルな GUI で Qwen3-ASR と 
 セットアップ済みのバッチで環境構築する方法です。
 この方法では、`uv`、Python 仮想環境、PyTorch、Qwen 系ランタイム、モデルダウンロードまでまとめて構成する想定です。
 
-実行前に、できるだけ短いパスで、英字のみを使い、スペースや記号を含まないフォルダを作成し、その中に `setup.bat` を置いて実行することを推奨します。
+`setup.bat` は、その bat ファイルを置いた場所を基準に `.venv`、`runtime`、`models` などの各種ファイルを作成します。つまり、ツールをインストールしたい場所に `setup.bat` を置いて実行して下さい。
 
-`setup.bat` は、実行した bat ファイルと同じ階層を基準に `.venv`、`runtime`、`models` などの各種ファイルを保存します。
+実行前に、できるだけ短いパスで、英字のみを使い、スペースや記号を含まないフォルダを作成し、その中で `setup.bat` を実行することを推奨します。これは、機械学習系のツールや関連ライブラリでは、長いパス、日本語や特殊文字を含むパス、スペースを含むパスで動作が不安定になったり、モデル配置や外部ツール呼び出しで問題が起きる場合があるためです。
 
 パターンA: `setup.bat` だけをダウンロードして実行
 
 `setup.bat` だけを取得したい場合は、GitHub から直接ダウンロードできます。
 
-- 閲覧: `https://github.com/siouni/SimpleQwen3-ASR-app/blob/main/setup.bat`
-- ダウンロード: `https://raw.githubusercontent.com/siouni/SimpleQwen3-ASR-app/main/setup.bat`
+- 閲覧: [setup.bat](https://github.com/siouni/SimpleQwen3-ASR-app/blob/main/setup.bat)
+- ダウンロード: [setup.bat を直接ダウンロード](https://raw.githubusercontent.com/siouni/SimpleQwen3-ASR-app/main/setup.bat)
 
-```powershell
-.\setup.bat
-```
+ダウンロードした `setup.bat` を、インストールしたい場所に置いてダブルクリックして実行します。
 
 パターンB: リポジトリを `git clone` してから実行
 
