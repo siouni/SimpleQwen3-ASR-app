@@ -1,6 +1,7 @@
 # このファイルはローカル実行環境やモデル資産など、git 管理から除外したい項目を定義します。
 runtime/
-models/
+models/*
+!models/.gitkeep
 .venv/
 __pycache__/
 AGENTS.md

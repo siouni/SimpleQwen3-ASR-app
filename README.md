@@ -33,11 +33,25 @@ SimpleQwen3-ASR は、PySide6 ベースのシンプルな GUI で Qwen3-ASR と 
 - ASR モデル: `.\models\Qwen3-ASR-1.7B`
 - ForcedAligner モデル: `.\models\Qwen3-ForcedAligner-0.6B`
 
+参考: 現在の `app.py` では未使用ですが、今後の拡張向けに以下の TTS 系モデル配置も想定します。
+
+- TTS モデル: `.\models\Qwen3-TTS-12Hz-1.7B-Base`
+- TTS Tokenizer: `.\models\Qwen3-TTS-Tokenizer-12Hz`
+
 ## インストール方法
 
 ### 1. `setup.bat` を使う方法
 
 セットアップ済みのバッチで環境構築する方法です。
+
+実行前に、できるだけ短いパスで、英字のみを使い、スペースや記号を含まないフォルダを作成し、その中に `setup.bat` を置いて実行することを推奨します。
+
+`setup.bat` は、実行した bat ファイルと同じ階層を基準に `.venv`、`runtime`、`models` などの各種ファイルを保存します。
+
+`setup.bat` だけを取得したい場合は、GitHub から直接ダウンロードできます。
+
+- 閲覧: `https://github.com/siouni/SimpleQwen3-ASR-app/blob/main/setup.bat`
+- ダウンロード: `https://raw.githubusercontent.com/siouni/SimpleQwen3-ASR-app/main/setup.bat`
 
 ```powershell
 .\setup.bat
@@ -99,6 +113,12 @@ hf download Qwen/Qwen3-TTS-Tokenizer-12Hz --local-dir .\models\Qwen3-TTS-Tokeniz
 
 ## 起動方法
 
+### 1. 起動用 bat ファイルをダブルクリックする方法
+
+エクスプローラー上で `launch_app.bat` をダブルクリックして起動します。
+
+### 2. PowerShell から起動する方法
+
 ```powershell
 .\.venv\Scripts\Activate.ps1
 python .\app.py
@@ -107,5 +127,6 @@ python .\app.py
 ## 現在の構成ファイル
 
 - `app.py`: GUI 本体
+- `launch_app.bat`: アプリ起動用バッチ
 - `setup.bat`: Windows 向けセットアップバッチ
 - `requirements.txt`: PyTorch を除く固定バージョン依存関係
