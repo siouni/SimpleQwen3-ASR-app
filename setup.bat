@@ -332,7 +332,7 @@ rem 1=実行 / 0=スキップ
 rem ============================================
 set "INSTALL_QWEN3_ASR=1"
 set "INSTALL_QWEN3_FORCED_ALIGNER=1"
-set "INSTALL_QWEN3_TTS=1"
+set "INSTALL_QWEN3_TTS=0"
 
 set "QWEN3_ASR_PACKAGE_SPEC=qwen-asr"
 set "QWEN3_TTS_PACKAGE_SPEC=qwen-tts"
