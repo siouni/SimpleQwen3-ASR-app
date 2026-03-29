@@ -24,7 +24,6 @@ SimpleQwen3-ASR は、PySide6 ベースのシンプルな GUI で Qwen3-ASR と 
 
 ## 前提条件
 
-- `uv` をユーザー環境にインストール済みであること
 - `requirements.txt` を使う方法では、PyTorch は別途ユーザー側でインストールすること
 
 ## モデル配置
@@ -48,7 +47,7 @@ SimpleQwen3-ASR は、PySide6 ベースのシンプルな GUI で Qwen3-ASR と 
 
 ### 2. `uv` と `requirements.txt` を使う方法
 
-`uv` が既にインストール済みで、PyTorch を別途インストールする前提で、アプリ実行に必要な Python パッケージのみを入れる方法です。
+`uv` が既にユーザー環境にインストール済みで、PyTorch を別途インストールする前提で、アプリ実行に必要な Python パッケージのみを入れる方法です。
 
 まず仮想環境を用意します。
 
@@ -70,7 +69,15 @@ uv venv .venv --python 3.12
 uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --torch-backend=cu128
 ```
 
-続けて、PyTorch を除く依存関係をインストールします。
+必要に応じて、FlashAttention2 もインストールします。
+
+例: Python 3.12 + torch 2.7 + cu128
+
+```powershell
+uv pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.4.10/flash_attn-2.8.2+cu128torch2.7-cp312-cp312-win_amd64.whl
+```
+
+続けて、PyTorch、FlashAttention2 を除く依存関係をインストールします。
 
 ```powershell
 uv pip install -r .\requirements.txt
