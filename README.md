@@ -77,7 +77,7 @@ git clone https://github.com/siouni/SimpleQwen3-ASR-app.git
 cd .\SimpleQwen3-ASR-app
 ```
 
-まず仮想環境を用意します。
+次に仮想環境を用意します。
 
 ```powershell
 uv venv .venv --python 3.12
