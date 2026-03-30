@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+import torch
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QObject, QThread, QUrl, Qt, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtGui import QColor
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
+    QComboBox,
     QListWidget,
     QListWidgetItem,
     QProgressBar,
@@ -73,31 +75,36 @@ class AudioSegment:
 
 class ASRWorker(QObject):
     progress_changed = Signal(int, int, str)
-    segment_finished = Signal(int, str, object)
+    segment_finished = Signal(int, str)
     completed = Signal()
     failed = Signal(str)
 
     def __init__(
         self,
         model_path: str,
-        aligner_path: str,
+        asr_model: Qwen3ASRModel | None,
         audio_data: np.ndarray,
         sample_rate: int,
         segments: list[AudioSegment],
+        target_device: str,
     ) -> None:
         super().__init__()
         self.model_path = model_path
-        self.aligner_path = aligner_path
+        self.asr_model = asr_model
         self.audio_data = audio_data
         self.sample_rate = sample_rate
         self.segments = segments
+        self.target_device = target_device
 
     def run(self) -> None:
         try:
             self.progress_changed.emit(0, len(self.segments), "ASR チェックポイントをロード中")
-            model = Qwen3ASRModel.from_pretrained(self.model_path)
-            self.progress_changed.emit(0, len(self.segments), "ForcedAligner チェックポイントをロード中")
-            aligner = Qwen3ForcedAligner.from_pretrained(self.aligner_path)
+            model = self.asr_model
+            if model is None:
+                model = Qwen3ASRModel.from_pretrained(self.model_path, **build_cpu_model_load_kwargs())
+                self.asr_model = model
+            self.progress_changed.emit(0, len(self.segments), f"ASR モデルを {self.target_device.upper()} に転送中")
+            move_asr_model_to_device(model, self.target_device)
             total = len(self.segments)
             for index, segment in enumerate(self.segments):
                 self.progress_changed.emit(index, total, f"ASR 実行中: {index + 1}/{total}")
@@ -105,22 +112,74 @@ class ASRWorker(QObject):
                 result = model.transcribe((segment_audio, self.sample_rate))
                 transcription = result[0] if result else None
                 text = transcription.text.strip() if transcription else ""
-                language = transcription.language if transcription and transcription.language else "ja"
-                align_items: list[dict[str, object]] = []
-                if text:
-                    self.progress_changed.emit(index, total, f"強制アライメント実行中: {index + 1}/{total}")
-                    align_result = aligner.align((segment_audio, self.sample_rate), text, language)
-                    if align_result:
-                        align_items = [
-                            {
-                                "text": item.text,
-                                "start_time": item.start_time,
-                                "end_time": item.end_time,
-                            }
-                            for item in align_result[0].items
-                        ]
-                self.segment_finished.emit(segment.index, text, align_items)
+                self.segment_finished.emit(segment.index, text)
+            if self.target_device == "gpu":
+                self.progress_changed.emit(total, total, "ASR モデルを CPU にオフロード中")
+                move_asr_model_to_device(model, "cpu")
             self.progress_changed.emit(total, total, "ASR 完了")
+            self.completed.emit()
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+
+
+class AlignWorker(QObject):
+    progress_changed = Signal(int, int, str)
+    segment_finished = Signal(int, object)
+    completed = Signal()
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        aligner_path: str,
+        forced_aligner: Qwen3ForcedAligner | None,
+        audio_data: np.ndarray,
+        sample_rate: int,
+        segments: list[AudioSegment],
+        texts: list[str],
+        target_device: str,
+    ) -> None:
+        super().__init__()
+        self.aligner_path = aligner_path
+        self.forced_aligner = forced_aligner
+        self.audio_data = audio_data
+        self.sample_rate = sample_rate
+        self.segments = segments
+        self.texts = texts
+        self.target_device = target_device
+
+    def run(self) -> None:
+        try:
+            self.progress_changed.emit(0, len(self.segments), "ForcedAligner チェックポイントをロード中")
+            aligner = self.forced_aligner
+            if aligner is None:
+                aligner = Qwen3ForcedAligner.from_pretrained(self.aligner_path, **build_cpu_model_load_kwargs())
+                self.forced_aligner = aligner
+            self.progress_changed.emit(0, len(self.segments), f"ForcedAligner モデルを {self.target_device.upper()} に転送中")
+            move_forced_aligner_to_device(aligner, self.target_device)
+            total = len(self.segments)
+            for index, segment in enumerate(self.segments):
+                text = self.texts[index].strip()
+                if not text:
+                    self.segment_finished.emit(segment.index, [])
+                    continue
+                self.progress_changed.emit(index, total, f"強制アライメント実行中: {index + 1}/{total}")
+                segment_audio = self.audio_data[segment.start_frame : segment.end_frame]
+                align_result = aligner.align((segment_audio, self.sample_rate), text, "ja")
+                align_items: list[dict[str, object]] = []
+                if align_result:
+                    align_items = [
+                        {
+                            "text": item.text,
+                            "start_time": item.start_time,
+                            "end_time": item.end_time,
+                        }
+                        for item in align_result[0].items
+                    ]
+                self.segment_finished.emit(segment.index, align_items)
+            if self.target_device == "gpu":
+                self.progress_changed.emit(total, total, "ForcedAligner モデルを CPU にオフロード中")
+                move_forced_aligner_to_device(aligner, "cpu")
+            self.progress_changed.emit(total, total, "強制アライメント完了")
             self.completed.emit()
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
@@ -200,6 +259,12 @@ class MainWindow(QMainWindow):
         self.current_preview_segment: AudioSegment | None = None
         self.asr_thread: QThread | None = None
         self.asr_worker: ASRWorker | None = None
+        self.align_thread: QThread | None = None
+        self.align_worker: AlignWorker | None = None
+        self.asr_model_cache: Qwen3ASRModel | None = None
+        self.forced_aligner_cache: Qwen3ForcedAligner | None = None
+        self.cuda_available = torch.cuda.is_available()
+        self.preferred_device = "gpu" if self.cuda_available else "cpu"
         self._slider_is_dragging = False
 
         self.audio_output = QAudioOutput(self)
@@ -229,6 +294,16 @@ class MainWindow(QMainWindow):
         self.file_meta_label.setObjectName("fileMetaLabel")
         self.file_meta_label.setWordWrap(True)
         self.file_meta_label.setContentsMargins(8, 4, 8, 4)
+
+        self.device_label = QLabel("実行デバイス")
+        self.device_label.setObjectName("sectionLabel")
+        self.device_combo = QComboBox()
+        self.device_combo.addItem("GPU", "gpu")
+        self.device_combo.addItem("CPU", "cpu")
+        self.device_combo.setCurrentIndex(0 if self.cuda_available else 1)
+        if not self.cuda_available:
+            self.device_combo.setEnabled(False)
+            self.device_combo.setToolTip("torch.cuda.is_available() が False のため CPU 固定です。")
 
         self.segment_info_label = QLabel("分割リスト: 未生成")
         self.segment_info_label.setObjectName("segmentInfoLabel")
@@ -281,17 +356,22 @@ class MainWindow(QMainWindow):
         self.play_button = QPushButton("再生")
         self.stop_button = QPushButton("停止")
         self.run_asr_button = QPushButton("ASR を実行")
+        self.run_align_button = QPushButton("強制アライメント")
         self.play_button.setEnabled(False)
         self.stop_button.setEnabled(False)
         self.run_asr_button.setEnabled(False)
+        self.run_align_button.setEnabled(False)
         button_row.addWidget(self.open_button)
         button_row.addWidget(self.play_button)
         button_row.addWidget(self.stop_button)
         button_row.addWidget(self.run_asr_button)
+        button_row.addWidget(self.run_align_button)
         button_row.addStretch(1)
 
         hero_layout.addWidget(self.drop_area)
         hero_layout.addWidget(self.file_meta_label)
+        hero_layout.addWidget(self.device_label)
+        hero_layout.addWidget(self.device_combo)
         hero_layout.addWidget(self.segment_info_label)
         hero_layout.addWidget(self.segment_list)
         hero_layout.addWidget(self.asr_progress_bar)
@@ -312,6 +392,8 @@ class MainWindow(QMainWindow):
         self.play_button.clicked.connect(self.toggle_playback)
         self.stop_button.clicked.connect(self.stop_playback)
         self.run_asr_button.clicked.connect(self.start_asr)
+        self.run_align_button.clicked.connect(self.start_alignment)
+        self.device_combo.currentIndexChanged.connect(self._on_device_changed)
         self.position_slider.sliderPressed.connect(self._on_slider_pressed)
         self.position_slider.sliderReleased.connect(self._on_slider_released)
         self.segment_list.currentRowChanged.connect(self._on_segment_selected)
@@ -321,6 +403,9 @@ class MainWindow(QMainWindow):
         self.player.durationChanged.connect(self._on_duration_changed)
         self.player.playbackStateChanged.connect(self._on_playback_state_changed)
         self.player.errorOccurred.connect(self._on_player_error)
+
+    def _on_device_changed(self, _index: int) -> None:
+        self.preferred_device = self.device_combo.currentData() or "cpu"
 
     def open_file_dialog(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(
@@ -416,6 +501,7 @@ class MainWindow(QMainWindow):
         self.result_text.clear()
         self.timestamp_list.clear()
         self.run_asr_button.setEnabled(False)
+        self.run_align_button.setEnabled(False)
         self.asr_progress_bar.setRange(0, 1)
         self.asr_progress_bar.setValue(0)
         self.asr_progress_bar.setFormat("分割準備中")
@@ -452,6 +538,7 @@ class MainWindow(QMainWindow):
 
         if self.segments:
             self.run_asr_button.setEnabled(True)
+            self.run_align_button.setEnabled(True)
             self.asr_progress_bar.setRange(0, len(self.segments))
             self.asr_progress_bar.setValue(0)
             self.asr_progress_bar.setFormat(f"未実行 (0/{len(self.segments)})")
@@ -494,13 +581,14 @@ class MainWindow(QMainWindow):
                 f"Qwen3-ForcedAligner モデルが見つかりません。\n{QWEN3_ALIGNER_MODEL_DIR}"
             )
             return
-        if self.asr_thread is not None:
+        if self.asr_thread is not None or self.align_thread is not None:
             return
 
         self.segment_texts = ["" for _ in self.segments]
         self.segment_timestamps = [[] for _ in self.segments]
         self._refresh_selected_segment_result()
         self.run_asr_button.setEnabled(False)
+        self.run_align_button.setEnabled(False)
         self.open_button.setEnabled(False)
         self.asr_progress_bar.setRange(0, len(self.segments))
         self.asr_progress_bar.setValue(0)
@@ -509,10 +597,11 @@ class MainWindow(QMainWindow):
         self.asr_thread = QThread(self)
         self.asr_worker = ASRWorker(
             str(QWEN3_ASR_MODEL_DIR),
-            str(QWEN3_ALIGNER_MODEL_DIR),
+            self.asr_model_cache,
             self.audio_data.copy(),
             self.sample_rate,
             list(self.segments),
+            self.preferred_device,
         )
         self.asr_worker.moveToThread(self.asr_thread)
 
@@ -532,10 +621,9 @@ class MainWindow(QMainWindow):
         self.asr_progress_bar.setFormat(f"{message}")
         self.statusBar().showMessage(message)
 
-    def _on_asr_segment_finished(self, index: int, text: str, timestamps: list[dict[str, object]]) -> None:
+    def _on_asr_segment_finished(self, index: int, text: str) -> None:
         if 0 <= index < len(self.segment_texts):
             self.segment_texts[index] = text
-            self.segment_timestamps[index] = timestamps
         self.asr_progress_bar.setValue(index + 1)
         self.asr_progress_bar.setFormat(f"ASR 実行中 ({index + 1}/{len(self.segments)})")
         self._refresh_selected_segment_result()
@@ -545,6 +633,7 @@ class MainWindow(QMainWindow):
         self.asr_progress_bar.setFormat(f"ASR 完了 ({len(self.segments)}/{len(self.segments)})")
         self.statusBar().showMessage("ASR 完了")
         self.run_asr_button.setEnabled(True)
+        self.run_align_button.setEnabled(True)
         self.open_button.setEnabled(True)
         self._refresh_selected_segment_result()
 
@@ -553,15 +642,99 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"ASR 失敗: {message}")
         self.result_text.setPlainText(f"ASR 実行中にエラーが発生しました。\n{message}")
         self.run_asr_button.setEnabled(True)
+        self.run_align_button.setEnabled(True)
         self.open_button.setEnabled(True)
 
     def _cleanup_asr_thread(self) -> None:
         if self.asr_worker is not None:
+            self.asr_model_cache = self.asr_worker.asr_model
             self.asr_worker.deleteLater()
         if self.asr_thread is not None:
             self.asr_thread.deleteLater()
         self.asr_worker = None
         self.asr_thread = None
+
+    def start_alignment(self) -> None:
+        if self.audio_data is None or not self.segments:
+            return
+        if not QWEN3_ALIGNER_MODEL_DIR.exists():
+            self.statusBar().showMessage(f"モデルが見つかりません: {QWEN3_ALIGNER_MODEL_DIR}")
+            self.result_text.setPlainText(
+                f"Qwen3-ForcedAligner モデルが見つかりません。\n{QWEN3_ALIGNER_MODEL_DIR}"
+            )
+            return
+        if self.asr_thread is not None or self.align_thread is not None:
+            return
+
+        self.segment_timestamps = [[] for _ in self.segments]
+        self._refresh_selected_segment_result()
+        self.run_asr_button.setEnabled(False)
+        self.run_align_button.setEnabled(False)
+        self.open_button.setEnabled(False)
+        self.asr_progress_bar.setRange(0, len(self.segments))
+        self.asr_progress_bar.setValue(0)
+        self.asr_progress_bar.setFormat(f"強制アライメント待機中 (0/{len(self.segments)})")
+
+        self.align_thread = QThread(self)
+        self.align_worker = AlignWorker(
+            str(QWEN3_ALIGNER_MODEL_DIR),
+            self.forced_aligner_cache,
+            self.audio_data.copy(),
+            self.sample_rate,
+            list(self.segments),
+            list(self.segment_texts),
+            self.preferred_device,
+        )
+        self.align_worker.moveToThread(self.align_thread)
+
+        self.align_thread.started.connect(self.align_worker.run)
+        self.align_worker.progress_changed.connect(self._on_align_progress_changed)
+        self.align_worker.segment_finished.connect(self._on_align_segment_finished)
+        self.align_worker.completed.connect(self._on_align_completed)
+        self.align_worker.failed.connect(self._on_align_failed)
+        self.align_worker.completed.connect(self.align_thread.quit)
+        self.align_worker.failed.connect(self.align_thread.quit)
+        self.align_thread.finished.connect(self._cleanup_align_thread)
+        self.align_thread.start()
+
+    def _on_align_progress_changed(self, completed_count: int, total_count: int, message: str) -> None:
+        self.asr_progress_bar.setRange(0, max(1, total_count))
+        self.asr_progress_bar.setValue(completed_count)
+        self.asr_progress_bar.setFormat(message)
+        self.statusBar().showMessage(message)
+
+    def _on_align_segment_finished(self, index: int, timestamps: list[dict[str, object]]) -> None:
+        if 0 <= index < len(self.segment_timestamps):
+            self.segment_timestamps[index] = timestamps
+        self.asr_progress_bar.setValue(index + 1)
+        self.asr_progress_bar.setFormat(f"強制アライメント実行中 ({index + 1}/{len(self.segments)})")
+        self._refresh_selected_segment_result()
+
+    def _on_align_completed(self) -> None:
+        self.asr_progress_bar.setValue(len(self.segments))
+        self.asr_progress_bar.setFormat(f"強制アライメント完了 ({len(self.segments)}/{len(self.segments)})")
+        self.statusBar().showMessage("強制アライメント完了")
+        self.run_asr_button.setEnabled(True)
+        self.run_align_button.setEnabled(True)
+        self.open_button.setEnabled(True)
+        self._refresh_selected_segment_result()
+
+    def _on_align_failed(self, message: str) -> None:
+        self.asr_progress_bar.setFormat("強制アライメント失敗")
+        self.statusBar().showMessage(f"強制アライメント失敗: {message}")
+        self.result_text.setPlainText(f"強制アライメント実行中にエラーが発生しました。\n{message}")
+        self.run_asr_button.setEnabled(True)
+        self.run_align_button.setEnabled(True)
+        self.open_button.setEnabled(True)
+
+    def _cleanup_align_thread(self) -> None:
+        if self.align_worker is not None:
+            self.forced_aligner_cache = self.align_worker.forced_aligner
+            self.align_worker.deleteLater()
+        if self.align_thread is not None:
+            self.align_thread.deleteLater()
+        self.align_worker = None
+        self.align_thread = None
 
     def _refresh_selected_segment_result(self) -> None:
         row = self.segment_list.currentRow()
@@ -740,6 +913,29 @@ def format_seconds(seconds: float) -> str:
     if hours:
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
     return f"{minutes:02d}:{seconds:02d}"
+
+
+def build_cpu_model_load_kwargs() -> dict[str, object]:
+    return {"device_map": "cpu", "dtype": torch.float32}
+
+
+def move_asr_model_to_device(model: Qwen3ASRModel, target_device: str) -> None:
+    target = "cuda:0" if target_device == "gpu" and torch.cuda.is_available() else "cpu"
+    dtype = torch.bfloat16 if target.startswith("cuda") else torch.float32
+    model.model.to(device=target, dtype=dtype)
+    model.device = torch.device(target)
+    model.dtype = dtype
+    if target == "cpu" and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def move_forced_aligner_to_device(aligner: Qwen3ForcedAligner, target_device: str) -> None:
+    target = "cuda:0" if target_device == "gpu" and torch.cuda.is_available() else "cpu"
+    dtype = torch.bfloat16 if target.startswith("cuda") else torch.float32
+    aligner.model.to(device=target, dtype=dtype)
+    aligner.device = torch.device(target)
+    if target == "cpu" and torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def run() -> int:
